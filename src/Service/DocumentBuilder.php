@@ -5,6 +5,7 @@ namespace SilverStripe\SearchService\Service;
 
 use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\Core\Injector\Injector;
+use SilverStripe\SearchService\Exception\IndexConfigurationException;
 use SilverStripe\SearchService\Exception\IndexingServiceException;
 use SilverStripe\SearchService\Interfaces\DocumentInterface;
 use SilverStripe\SearchService\Interfaces\DocumentMetaProvider;
@@ -22,7 +23,6 @@ class DocumentBuilder
      * DocumentBuilder constructor.
      * @param IndexConfiguration $configuration
      * @param DocumentFetchCreatorRegistry $registry
-     * @param IndexingInterface $service
      */
     public function __construct(
         IndexConfiguration $configuration,
@@ -36,6 +36,7 @@ class DocumentBuilder
      * @param DocumentInterface $document
      * @return array
      * @throws IndexingServiceException
+     * @throws IndexConfigurationException
      */
     public function toArray(DocumentInterface $document): array
     {
@@ -51,9 +52,8 @@ class DocumentBuilder
         }
 
         $data[$sourceClassField] = $document->getSourceClass();
-        $data = $this->truncateDocument($data);
 
-        return $data;
+        return $this->truncateDocument($data);
     }
 
     /**
