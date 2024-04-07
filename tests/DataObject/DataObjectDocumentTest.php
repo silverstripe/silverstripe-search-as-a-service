@@ -21,6 +21,7 @@ use SilverStripe\SearchService\Tests\Fake\TagFake;
 use SilverStripe\SearchService\Tests\SearchServiceTest;
 use SilverStripe\Security\Member;
 use SilverStripe\Subsites\Model\Subsite;
+use SilverStripe\Versioned\Versioned;
 
 class DataObjectDocumentTest extends SearchServiceTest
 {
@@ -658,6 +659,50 @@ class DataObjectDocumentTest extends SearchServiceTest
         );
 
         unserialize(serialize($doc));
+    }
+
+    public function testToArrayInQueueRun(): void
+    {
+        $config = $this->mockConfig();
+        $config->set('getSearchableClasses', [
+            PageFake::class,
+        ]);
+        $config->set('getFieldsForClass', [
+            PageFake::class => [
+                new Field('title'),
+                new Field('page_link', 'Link'),
+            ],
+        ]);
+
+        Versioned::withVersionedMode(function (): void {
+            // Reading mode as if run by job - development Admin sets Draft reading mode
+            // usually via /dev/tasks/ProcessJobQueueTask
+            // @see SilverStripe\Dev\DevelopmentAdmin
+            Versioned::set_stage(Versioned::DRAFT);
+
+            $dataObject = PageFake::create();
+            $dataObject->Title = 'Published';
+            $dataObject->write();
+            $dataObject->publishRecursive();
+            $dataObject->Title = 'Draft';
+            $dataObject->write();
+
+            $doc = DataObjectDocument::create($dataObject);
+
+            /** @var DataObjectDocument $serialDoc */
+            $serialDoc = unserialize(serialize($doc));
+            $indexData = $serialDoc->toArray();
+
+            $this->assertEqualsCanonicalizing(
+                [
+                    'page_content' => '',
+                    'title' => 'Published',
+                    'page_link' => '/published',
+                ],
+                $indexData,
+                'Potential draft content being indexed'
+            );
+        });
     }
 
 }

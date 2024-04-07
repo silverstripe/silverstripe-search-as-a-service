@@ -606,14 +606,25 @@ class DataObjectDocument implements
 
     public function __unserialize(array $data): void
     {
-        $dataObject = DataObject::get_by_id($data['className'], $data['id']);
+        if (DataObject::has_extension($data['className'], Versioned::class)) {
+            // get data object in live mode always - needed as queue runners normally use a dev task to run
+            // so will have a DRAFT reading mode @see SilverStripe\Dev\DevelopmentAdmin
+            $dataObject = Versioned::withVersionedMode(function () use ($data): ?DataObject {
+                Versioned::set_stage(Versioned::LIVE);
 
-        if (!$dataObject && DataObject::has_extension($data['className'], Versioned::class) && $data['fallback']) {
-            // get the latest version - usually this is an object that has been deleted
-            $dataObject = Versioned::get_latest_version(
-                $data['className'],
-                $data['id']
-            );
+                return DataObject::get_by_id($data['className'], $data['id']);
+            });
+
+            if (!$dataObject && $data['fallback']) {
+                // get the latest version - usually this is an object that has been deleted
+                $dataObject = Versioned::get_latest_version(
+                    $data['className'],
+                    $data['id']
+                );
+            }
+        } else {
+            // un-versioned object so we don't need to worry about stages and fallbacks do not exist
+            $dataObject = DataObject::get_by_id($data['className'], $data['id']);
         }
 
         if (!$dataObject) {
