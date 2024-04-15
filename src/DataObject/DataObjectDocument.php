@@ -19,6 +19,7 @@ use SilverStripe\ORM\FieldType\DBField;
 use SilverStripe\ORM\RelationList;
 use SilverStripe\ORM\UnsavedRelationList;
 use SilverStripe\SearchService\Exception\IndexConfigurationException;
+use SilverStripe\SearchService\Exception\IndexingServiceException;
 use SilverStripe\SearchService\Extensions\DBFieldExtension;
 use SilverStripe\SearchService\Extensions\SearchServiceExtension;
 use SilverStripe\SearchService\Interfaces\DataObjectDocumentInterface;
@@ -147,8 +148,10 @@ class DataObjectDocument implements
             return false;
         }
 
-        // Dataobject is only in draft
-        if ($dataObject->hasExtension(Versioned::class) && !$dataObject->isLiveVersion()) {
+        // DataObject has no published version (or draft changes could cause a doc to be removed)
+        if ($dataObject->hasExtension(Versioned::class) && !$dataObject->isPublished()) {
+            // note even if we pass a draft object to the indexer onAddToSearchIndexes will
+            // set the version to live before adding
             return false;
         }
 
@@ -204,24 +207,20 @@ class DataObjectDocument implements
     /**
      * Generates a map of all the fields and values which will be sent
      *
+     * This will always use the current DataObject so you must ensure
+     * it is in the correct state (eg Live) prior to calling toArray.
+     * For example the onAddToSearchIndexes method will set the data
+     * object to LIVE when adding to the index
+     *
+     * @see DataObjectDocument::onAddToSearchIndexes()
      * @throws IndexConfigurationException
      */
     public function toArray(): array
     {
         $pageContentField = $this->config()->get('page_content_field');
 
-        if ($this->getDataObject()->hasExtension(Versioned::class)) {
-            $dataObject = Versioned::withVersionedMode(function () {
-                Versioned::set_stage(Versioned::LIVE);
-
-                return DataObject::get_by_id($this->getSourceClass(), $this->getDataObject()->ID);
-            });
-        } else {
-            $dataObject = DataObject::get_by_id(
-                $this->getSourceClass(),
-                $this->getDataObject()->ID
-            );
-        }
+        // assume shouldIndex is called before this
+        $dataObject = $this->getDataObject();
 
         if (!$dataObject || !$dataObject->exists()) {
             throw new IndexConfigurationException(
@@ -606,25 +605,14 @@ class DataObjectDocument implements
 
     public function __unserialize(array $data): void
     {
-        if (DataObject::has_extension($data['className'], Versioned::class)) {
-            // get data object in live mode always - needed as queue runners normally use a dev task to run
-            // so will have a DRAFT reading mode @see SilverStripe\Dev\DevelopmentAdmin
-            $dataObject = Versioned::withVersionedMode(function () use ($data): ?DataObject {
-                Versioned::set_stage(Versioned::LIVE);
+        $dataObject = DataObject::get_by_id($data['className'], $data['id']);
 
-                return DataObject::get_by_id($data['className'], $data['id']);
-            });
-
-            if (!$dataObject && $data['fallback']) {
-                // get the latest version - usually this is an object that has been deleted
-                $dataObject = Versioned::get_latest_version(
-                    $data['className'],
-                    $data['id']
-                );
-            }
-        } else {
-            // un-versioned object so we don't need to worry about stages and fallbacks do not exist
-            $dataObject = DataObject::get_by_id($data['className'], $data['id']);
+        if (!$dataObject && DataObject::has_extension($data['className'], Versioned::class) && $data['fallback']) {
+            // get the latest version - usually this is an object that has been deleted
+            $dataObject = Versioned::get_latest_version(
+                $data['className'],
+                $data['id']
+            );
         }
 
         if (!$dataObject) {
@@ -639,8 +627,32 @@ class DataObjectDocument implements
         }
     }
 
+    /**
+     * Add to index event handler
+     *
+     * @throws IndexingServiceException
+     * @return void
+     */
     public function onAddToSearchIndexes(string $event): void
     {
+        if ($event === DocumentAddHandler::BEFORE_ADD) {
+            // make sure DataObject is always live on adding to the index
+            Versioned::withVersionedMode(function (): void {
+                Versioned::set_stage(Versioned::LIVE);
+
+                $currentDataObject = $this->getDataObject();
+
+                $liveDataObject = DataObject::get($currentDataObject->ClassName)->byID($currentDataObject->ID);
+
+                if (!$liveDataObject) {
+                    // unlikely case as indexer calls 'shouldIndex' immediately prior to this
+                    throw new IndexingServiceException('Only published DataObjects may be added to the index');
+                }
+
+                $this->setDataObject($liveDataObject);
+            });
+        }
+
         if ($event === DocumentAddHandler::AFTER_ADD) {
             $this->markIndexed();
         }
