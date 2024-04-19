@@ -19,6 +19,7 @@ use SilverStripe\ORM\FieldType\DBField;
 use SilverStripe\ORM\RelationList;
 use SilverStripe\ORM\UnsavedRelationList;
 use SilverStripe\SearchService\Exception\IndexConfigurationException;
+use SilverStripe\SearchService\Exception\IndexingServiceException;
 use SilverStripe\SearchService\Extensions\DBFieldExtension;
 use SilverStripe\SearchService\Extensions\SearchServiceExtension;
 use SilverStripe\SearchService\Interfaces\DataObjectDocumentInterface;
@@ -147,8 +148,10 @@ class DataObjectDocument implements
             return false;
         }
 
-        // Dataobject is only in draft
-        if ($dataObject->hasExtension(Versioned::class) && !$dataObject->isLiveVersion()) {
+        // DataObject has no published version (or draft changes could cause a doc to be removed)
+        if ($dataObject->hasExtension(Versioned::class) && !$dataObject->isPublished()) {
+            // note even if we pass a draft object to the indexer onAddToSearchIndexes will
+            // set the version to live before adding
             return false;
         }
 
@@ -204,24 +207,20 @@ class DataObjectDocument implements
     /**
      * Generates a map of all the fields and values which will be sent
      *
+     * This will always use the current DataObject so you must ensure
+     * it is in the correct state (eg Live) prior to calling toArray.
+     * For example the onAddToSearchIndexes method will set the data
+     * object to LIVE when adding to the index
+     *
+     * @see DataObjectDocument::onAddToSearchIndexes()
      * @throws IndexConfigurationException
      */
     public function toArray(): array
     {
         $pageContentField = $this->config()->get('page_content_field');
 
-        if ($this->getDataObject()->hasExtension(Versioned::class)) {
-            $dataObject = Versioned::withVersionedMode(function () {
-                Versioned::set_stage(Versioned::LIVE);
-
-                return DataObject::get_by_id($this->getSourceClass(), $this->getDataObject()->ID);
-            });
-        } else {
-            $dataObject = DataObject::get_by_id(
-                $this->getSourceClass(),
-                $this->getDataObject()->ID
-            );
-        }
+        // assume shouldIndex is called before this
+        $dataObject = $this->getDataObject();
 
         if (!$dataObject || !$dataObject->exists()) {
             throw new IndexConfigurationException(
@@ -371,6 +370,12 @@ class DataObjectDocument implements
     }
 
     /**
+     * Collects documents that depend on the current DataObject for indexing.
+     * It will inspect the search index configuration for anything using this object in a field or, if the
+     * current object is an instance of SiteTree, it will respect `enforce_strict_hierarchy`
+     * and add any child objects.
+     *
+     * @see [the dependency tracking docs](docs/en/usage.md#dependency-tracking)
      * @return DocumentInterface[]
      */
     public function getDependentDocuments(): array
@@ -440,7 +445,7 @@ class DataObjectDocument implements
 
                     /** @var DataObjectDocument $candidateDocument */
                     foreach ($chunker->chunk() as $candidateDocument) {
-                        $relatedObj = $candidateDocument->getFieldValue($field);
+                        $relatedObj = $candidateDocument->getFieldDependency($field);
 
                         // Singleton returned a dataobject, but this record did not. Rare, but possible.
                         if (!$relatedObj instanceof $objectClass) {
@@ -448,7 +453,7 @@ class DataObjectDocument implements
                         }
 
                         if ($relatedObj->ID === $ownedDataObject->ID) {
-                            $docs[$document->getIdentifier()] = $document;
+                            $docs[$candidateDocument->getIdentifier()] = $candidateDocument;
                         }
                     }
                 }
@@ -622,8 +627,32 @@ class DataObjectDocument implements
         }
     }
 
+    /**
+     * Add to index event handler
+     *
+     * @throws IndexingServiceException
+     * @return void
+     */
     public function onAddToSearchIndexes(string $event): void
     {
+        if ($event === DocumentAddHandler::BEFORE_ADD) {
+            // make sure DataObject is always live on adding to the index
+            Versioned::withVersionedMode(function (): void {
+                Versioned::set_stage(Versioned::LIVE);
+
+                $currentDataObject = $this->getDataObject();
+
+                $liveDataObject = DataObject::get($currentDataObject->ClassName)->byID($currentDataObject->ID);
+
+                if (!$liveDataObject) {
+                    // unlikely case as indexer calls 'shouldIndex' immediately prior to this
+                    throw new IndexingServiceException('Only published DataObjects may be added to the index');
+                }
+
+                $this->setDataObject($liveDataObject);
+            });
+        }
+
         if ($event === DocumentAddHandler::AFTER_ADD) {
             $this->markIndexed();
         }

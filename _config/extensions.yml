@@ -26,4 +26,5 @@ Only:
 ---
 SilverStripe\CMS\Model\SiteTree:
   extensions:
-    - SilverStripe\SearchService\Extensions\SearchServiceExtension
+    SearchServiceExtension: SilverStripe\SearchService\Extensions\SearchServiceExtension
+    SiteTreeHierarchyExtension: SilverStripe\SearchService\Extensions\SiteTreeHierarchyExtension
