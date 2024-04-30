@@ -28,3 +28,6 @@ SilverStripe\CMS\Model\SiteTree:
   extensions:
     SearchServiceExtension: SilverStripe\SearchService\Extensions\SearchServiceExtension
     SiteTreeHierarchyExtension: SilverStripe\SearchService\Extensions\SiteTreeHierarchyExtension
+SilverStripe\Assets\File:
+  extensions:
+    SearchServiceExtension: SilverStripe\SearchService\Extensions\SearchServiceExtension
