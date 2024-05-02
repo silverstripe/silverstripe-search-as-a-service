@@ -60,9 +60,15 @@ class SearchServiceExtension extends DataExtension
         $this->setBatchProcessor($batchProcessor);
     }
 
+    /**
+     * General DataObject Search settings
+     *
+     * @param FieldList $fields
+     * @return void
+     */
     public function updateCMSFields(FieldList $fields): void
     {
-        if (!$this->getConfiguration()->isEnabled()) {
+        if ($this->owner instanceof SiteTree || !$this->getConfiguration()->isEnabled()) {
             return;
         }
 
@@ -75,12 +81,28 @@ class SearchServiceExtension extends DataExtension
             _t(self::class . '.LastIndexed', 'Last indexed in search')
         );
 
-        if ($this->owner instanceof SiteTree) {
-            $fields->addFieldToTab('Root.Main', $searchIndexedField);
-        } else {
-            $fields->push($showInSearchField);
-            $fields->push($searchIndexedField);
+        $fields->push($showInSearchField);
+        $fields->push($searchIndexedField);
+    }
+
+    /**
+     * Specific settings for SiteTree
+     *
+     * @param FieldList $fields
+     * @return void
+     */
+    public function updateSettingsFields(FieldList $fields): void
+    {
+        if (!$this->owner instanceof SiteTree || !$this->getConfiguration()->isEnabled()) {
+            return;
         }
+
+        $searchIndexedField = ReadonlyField::create(
+            'SearchIndexed',
+            _t(self::class . '.LastIndexed', 'Last indexed in search')
+        );
+
+        $fields->insertAfter('ShowInSearch', $searchIndexedField);
     }
 
     /**
