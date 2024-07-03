@@ -25,7 +25,7 @@ class DataObjectFakeVersioned extends DataObject implements TestOnly
 
     private static array $db = [
         'Title' => 'Varchar',
-        'ShowInSearch' => 'Boolean',
+        'ShowInSearch' => 'Boolean(1)',
     ];
 
     public function canView(mixed $member = null): bool

@@ -38,7 +38,7 @@ class SearchServiceExtension extends DataExtension
     use BatchProcessorAware;
 
     private static array $db = [
-        'ShowInSearch' => 'Boolean',
+        'ShowInSearch' => 'Boolean(1)',
         'SearchIndexed' => 'Datetime',
     ];
 
